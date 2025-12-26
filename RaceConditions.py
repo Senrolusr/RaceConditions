@@ -10,10 +10,8 @@ from urllib.parse import urlparse
 class RawHTTPRepeater:
     def __init__(self, root):
         self.root = root
-        self.root.title("HTTP原始数据包并发发送工具")
-        self.root.geometry("1000x700")
-        # 并发设置
-        self.concurrent_var = tk.StringVar(value="1")
+        self.root.title("HTTP原始数据包并发发送工具 (竞态条件测试)")
+        self.root.geometry("1100x750")
         
         # 创建主框架
         main_frame = ttk.Frame(root, padding="10")
@@ -28,6 +26,11 @@ class RawHTTPRepeater:
         # 状态栏
         self.status_bar = ttk.Label(main_frame, text="就绪", relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # 响应锁（用于线程安全更新UI）
+        self.response_lock = threading.Lock()
+        self.response1_results = []
+        self.response2_results = []
         
         
     def create_request_panel(self, parent):
@@ -65,24 +68,28 @@ class RawHTTPRepeater:
         
         ttk.Button(button_frame, text="同时发送请求", command=self.send_requests).pack(side=tk.LEFT, padx=(0, 10))
         ttk.Button(button_frame, text="清空所有", command=self.clear_all).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(button_frame, text="解析请求", command=self.parse_requests).pack(side=tk.LEFT)
+        ttk.Button(button_frame, text="解析请求", command=self.parse_requests).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(button_frame, text="对比响应", command=self.compare_responses).pack(side=tk.LEFT)
         
-        # 延迟设置区域
-        delay_frame = ttk.Frame(control_frame)
-        delay_frame.pack(side=tk.RIGHT)
+        # 设置区域（右侧）
+        settings_frame = ttk.Frame(control_frame)
+        settings_frame.pack(side=tk.RIGHT)
         
-        ttk.Label(delay_frame, text="请求延迟(ms):").pack(side=tk.LEFT, padx=(0, 5))
-        self.delay_var = tk.StringVar(value="0")
-        delay_spin = ttk.Spinbox(delay_frame, from_=0, to=10000, textvariable=self.delay_var, width=8)
-        delay_spin.pack(side=tk.LEFT)
-        # 并发设置区域
-        concurrent_frame = ttk.Frame(control_frame)
-        concurrent_frame.pack(side=tk.RIGHT, padx=(20, 0))
+        # HTTPS选项
+        self.https_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(settings_frame, text="强制HTTPS", variable=self.https_var).pack(side=tk.LEFT, padx=(0, 15))
         
-        ttk.Label(concurrent_frame, text="并发次数:").pack(side=tk.LEFT, padx=(0, 5))
+        # 并发设置
+        ttk.Label(settings_frame, text="并发次数:").pack(side=tk.LEFT, padx=(0, 5))
         self.concurrent_var = tk.StringVar(value="1")
-        concurrent_spin = ttk.Spinbox(concurrent_frame, from_=1, to=100, textvariable=self.concurrent_var, width=6)
-        concurrent_spin.pack(side=tk.LEFT)
+        concurrent_spin = ttk.Spinbox(settings_frame, from_=1, to=100, textvariable=self.concurrent_var, width=6)
+        concurrent_spin.pack(side=tk.LEFT, padx=(0, 15))
+        
+        # 延迟设置
+        ttk.Label(settings_frame, text="请求延迟(ms):").pack(side=tk.LEFT, padx=(0, 5))
+        self.delay_var = tk.StringVar(value="0")
+        delay_spin = ttk.Spinbox(settings_frame, from_=0, to=10000, textvariable=self.delay_var, width=8)
+        delay_spin.pack(side=tk.LEFT)
     
     def create_response_panel(self, parent):
         # 响应面板容器
@@ -132,6 +139,10 @@ class RawHTTPRepeater:
         """在新线程中发送请求"""
         start_time = time.time()
         
+        # 清空之前的结果
+        self.response1_results = []
+        self.response2_results = []
+        
         # 获取延迟时间和并发次数
         try:
             delay_ms = int(self.delay_var.get())
@@ -143,22 +154,36 @@ class RawHTTPRepeater:
         except ValueError:
             concurrent_count = 1
         
+        # 规范化请求包换行符
+        req1_text = self._normalize_line_endings(req1_text)
+        req2_text = self._normalize_line_endings(req2_text)
+        
+        # 清空响应区域
+        self.root.after(0, lambda: self.response1.delete(1.0, tk.END))
+        self.root.after(0, lambda: self.response2.delete(1.0, tk.END))
+        
         # 发送请求
         try:
             threads = []
+            barrier = threading.Barrier(
+                (1 if req1_text else 0) * concurrent_count + 
+                (1 if req2_text else 0) * concurrent_count
+            )
             
             # 创建并发线程
             for i in range(concurrent_count):
-                if req1_text: #如果有请求包1
-                    thread1 = threading.Thread(target=self._send_single_request, args=(1, req1_text, delay_ms, i, concurrent_count))
+                if req1_text:
+                    thread1 = threading.Thread(
+                        target=self._send_single_request, 
+                        args=(1, req1_text, delay_ms, i, concurrent_count, barrier)
+                    )
                     threads.append(thread1)
                 if req2_text:
-                    thread2 = threading.Thread(target=self._send_single_request, args=(2, req2_text, delay_ms, i, concurrent_count))
+                    thread2 = threading.Thread(
+                        target=self._send_single_request, 
+                        args=(2, req2_text, delay_ms, i, concurrent_count, barrier)
+                    )
                     threads.append(thread2)
-            
-            # 应用延迟
-            if delay_ms > 0:
-                time.sleep(delay_ms / 1000.0)
             
             # 启动所有线程
             for thread in threads:
@@ -169,16 +194,38 @@ class RawHTTPRepeater:
                 thread.join()
             
             elapsed_time = time.time() - start_time
-            self.root.after(0, lambda: self.status_bar.config(text=f"请求完成 (总耗时: {elapsed_time:.2f}秒)"))
+            self.root.after(0, lambda: self.status_bar.config(
+                text=f"请求完成 (总耗时: {elapsed_time:.2f}秒, 并发: {concurrent_count}次)"
+            ))
             
         except Exception as e:
             self.root.after(0, lambda: self.status_bar.config(text=f"错误: {str(e)}"))
     
-    def _send_single_request(self, req_num, request_text, delay_ms=0, request_id=0, concurrent_count=1):
+    def _normalize_line_endings(self, text):
+        """规范化HTTP请求的换行符为CRLF"""
+        if not text:
+            return text
+        # 先统一为\n，再转换为\r\n
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        text = text.replace('\n', '\r\n')
+        # 确保请求以\r\n\r\n结尾（如果有body的话）
+        if not text.endswith('\r\n'):
+            text += '\r\n'
+        return text
+    
+    def _send_single_request(self, req_num, request_text, delay_ms=0, request_id=0, concurrent_count=1, barrier=None):
         """发送单个原始HTTP请求"""
+        # 等待所有线程就绪后同时发送（真正的并发）
+        if barrier:
+            try:
+                barrier.wait(timeout=5)
+            except threading.BrokenBarrierError:
+                pass
+        
         # 应用请求延迟
         if delay_ms > 0:
             time.sleep(delay_ms / 1000.0)
+        
         start_time = time.time()
         
         try:
@@ -189,30 +236,63 @@ class RawHTTPRepeater:
             response = self._send_raw_http(request_text, host, port, is_https, max_redirects=5)
             elapsed_time = (time.time() - start_time) * 1000  # 转换为毫秒
             
-            # 更新UI（显示并发请求信息）
-            if concurrent_count > 1:
-                response = f"[请求{request_id+1}] {response}"
-            
-            if req_num == 1:
-                self.root.after(0, lambda: self._update_response_ui(
-                    self.response1, response, elapsed_time, request_id))
-            else:
-                self.root.after(0, lambda: self._update_response_ui(
-                    self.response2, response, elapsed_time, request_id))
+            # 更新UI（线程安全）
+            with self.response_lock:
+                result_entry = {
+                    'id': request_id + 1,
+                    'time': elapsed_time,
+                    'response': response,
+                    'status': self._extract_status_code(response)
+                }
+                
+                if req_num == 1:
+                    self.response1_results.append(result_entry)
+                    self.root.after(0, lambda r=result_entry: self._append_response(self.response1, r))
+                else:
+                    self.response2_results.append(result_entry)
+                    self.root.after(0, lambda r=result_entry: self._append_response(self.response2, r))
                 
         except Exception as e:
-            error_text = f"请求失败: {str(e)}"
-            if req_num == 1:
-                self.root.after(0, lambda: self._update_response_ui(self.response1, error_text, 0, request_id))
-            else:
-                self.root.after(0, lambda: self._update_response_ui(self.response2, error_text, 0, request_id))
+            error_entry = {
+                'id': request_id + 1,
+                'time': 0,
+                'response': f"请求失败: {str(e)}",
+                'status': 'ERROR'
+            }
+            with self.response_lock:
+                if req_num == 1:
+                    self.response1_results.append(error_entry)
+                    self.root.after(0, lambda r=error_entry: self._append_response(self.response1, r))
+                else:
+                    self.response2_results.append(error_entry)
+                    self.root.after(0, lambda r=error_entry: self._append_response(self.response2, r))
+    
+    def _extract_status_code(self, response):
+        """从响应中提取状态码"""
+        try:
+            first_line = response.split('\r\n')[0] if '\r\n' in response else response.split('\n')[0]
+            parts = first_line.split(' ')
+            if len(parts) >= 2:
+                return parts[1]
+        except:
+            pass
+        return 'UNKNOWN'
+    
+    def _append_response(self, text_widget, result):
+        """追加响应到文本框"""
+        text_widget.insert(tk.END, f"{'='*50}\n")
+        text_widget.insert(tk.END, f"[请求 #{result['id']}] 状态: {result['status']} | 耗时: {result['time']:.0f}ms\n")
+        text_widget.insert(tk.END, f"{'='*50}\n")
+        text_widget.insert(tk.END, result['response'])
+        text_widget.insert(tk.END, "\n\n")
+        text_widget.see(tk.END)
     
     def _parse_request_target(self, request_text):
         """从请求包中解析目标主机和端口"""
-        lines = request_text.split('\n')
+        lines = request_text.split('\r\n') if '\r\n' in request_text else request_text.split('\n')
         host = None
         port = 80
-        is_https = False
+        is_https = self.https_var.get()  # 检查强制HTTPS选项
         
         # 检查请求行
         first_line = lines[0].strip()
@@ -224,15 +304,17 @@ class RawHTTPRepeater:
                 if line.lower().startswith('host:'):
                     host_part = line[5:].strip()
                     if ':' in host_part:
-                        host, port_str = host_part.split(':', 1)
-                        port = int(port_str)
+                        host, port_str = host_part.rsplit(':', 1)
+                        try:
+                            port = int(port_str)
+                        except ValueError:
+                            port = 443 if is_https else 80
                     else:
                         host = host_part
                     break
             
             # 如果没有找到Host头，尝试从请求行中提取
             if not host:
-                # 尝试从请求行中提取完整URL
                 parts = first_line.split(' ')
                 if len(parts) >= 2:
                     url_part = parts[1]
@@ -243,31 +325,39 @@ class RawHTTPRepeater:
                         is_https = parsed.scheme == 'https'
         
         if not host:
-            raise ValueError("无法从请求包中解析目标主机")
+            raise ValueError("无法从请求包中解析目标主机，请检查Host头")
         
-        # 如果没有明确指定端口，但请求是HTTPS，则使用443
-        if port == 80 and is_https:
+        # 根据端口自动判断HTTPS
+        if port == 443:
+            is_https = True
+        
+        # 如果强制HTTPS且端口是80，改为443
+        if is_https and port == 80:
             port = 443
         
         return host, port, is_https
     
     def _send_raw_http(self, request_text, host, port, is_https, max_redirects=5):
         """发送原始HTTP请求"""
-        # 创建socket连接
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(10)
         
         try:
-            # 连接到服务器
             sock.connect((host, port))
             
-            # 如果是HTTPS，包装socket
             if is_https:
                 context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE  # 忽略证书验证（测试用）
                 sock = context.wrap_socket(sock, server_hostname=host)
             
-            # 发送请求
-            sock.send(request_text.encode('utf-8'))
+            # 确保请求以正确的换行符结尾
+            if not request_text.endswith('\r\n\r\n'):
+                if '\r\n\r\n' not in request_text:
+                    # 没有空行分隔header和body，添加一个
+                    request_text += '\r\n'
+            
+            sock.sendall(request_text.encode('utf-8'))
 
             
             # 接收完整的HTTP响应
@@ -454,7 +544,49 @@ class RawHTTPRepeater:
         self.request2.delete(1.0, tk.END)
         self.response1.delete(1.0, tk.END)
         self.response2.delete(1.0, tk.END)
+        self.response1_results = []
+        self.response2_results = []
         self.status_bar.config(text="已清空所有内容")
+    
+    def compare_responses(self):
+        """对比响应结果（用于检测竞态条件）"""
+        if not self.response1_results and not self.response2_results:
+            messagebox.showinfo("对比结果", "没有响应数据可对比")
+            return
+        
+        report = "=== 响应对比分析 ===\n\n"
+        
+        # 分析响应1
+        if self.response1_results:
+            report += "【请求包1 响应分析】\n"
+            statuses = [r['status'] for r in self.response1_results]
+            times = [r['time'] for r in self.response1_results]
+            
+            report += f"  总请求数: {len(self.response1_results)}\n"
+            report += f"  状态码分布: {dict((s, statuses.count(s)) for s in set(statuses))}\n"
+            report += f"  响应时间: 最小={min(times):.0f}ms, 最大={max(times):.0f}ms, 平均={sum(times)/len(times):.0f}ms\n"
+            
+            # 检测响应内容差异
+            unique_responses = len(set(r['response'][:500] for r in self.response1_results))
+            if unique_responses > 1:
+                report += f"  ⚠️ 发现 {unique_responses} 种不同响应内容！可能存在竞态条件\n"
+            report += "\n"
+        
+        # 分析响应2
+        if self.response2_results:
+            report += "【请求包2 响应分析】\n"
+            statuses = [r['status'] for r in self.response2_results]
+            times = [r['time'] for r in self.response2_results]
+            
+            report += f"  总请求数: {len(self.response2_results)}\n"
+            report += f"  状态码分布: {dict((s, statuses.count(s)) for s in set(statuses))}\n"
+            report += f"  响应时间: 最小={min(times):.0f}ms, 最大={max(times):.0f}ms, 平均={sum(times)/len(times):.0f}ms\n"
+            
+            unique_responses = len(set(r['response'][:500] for r in self.response2_results))
+            if unique_responses > 1:
+                report += f"  ⚠️ 发现 {unique_responses} 种不同响应内容！可能存在竞态条件\n"
+        
+        messagebox.showinfo("响应对比分析", report)
     
     def parse_requests(self):
         """解析请求包并显示信息"""
