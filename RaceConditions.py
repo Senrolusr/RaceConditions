@@ -5,6 +5,8 @@ import socket
 import ssl
 import time
 import re
+import gzip
+import zlib
 from urllib.parse import urlparse
 
 class RawHTTPRepeater:
@@ -31,65 +33,65 @@ class RawHTTPRepeater:
         self.response_lock = threading.Lock()
         self.response1_results = []
         self.response2_results = []
-        
-        
+
+
     def create_request_panel(self, parent):
-        # 请求面板容器
-        request_frame = ttk.LabelFrame(parent, text="原始HTTP请求包", padding="10")
-        request_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
-        
-        # 创建两个请求面板
-        paned_window = ttk.PanedWindow(request_frame, orient=tk.HORIZONTAL)
-        paned_window.pack(fill=tk.BOTH, expand=True)
-        
-        # 请求1面板
-        req1_frame = ttk.Frame(paned_window)
-        paned_window.add(req1_frame, weight=1)
-        
-        ttk.Label(req1_frame, text="请求包 1:").pack(anchor=tk.W)
-        self.request1 = scrolledtext.ScrolledText(req1_frame, height=12, width=50)
-        self.request1.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
-        
-        # 请求2面板
-        req2_frame = ttk.Frame(paned_window)
-        paned_window.add(req2_frame, weight=1)
-        
-        ttk.Label(req2_frame, text="请求包 2:").pack(anchor=tk.W)
-        self.request2 = scrolledtext.ScrolledText(req2_frame, height=12, width=50)
-        self.request2.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
-        
-        # 控制按钮和延迟设置
-        control_frame = ttk.Frame(request_frame)
-        control_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        # 按钮区域
-        button_frame = ttk.Frame(control_frame)
-        button_frame.pack(side=tk.LEFT)
-        
-        ttk.Button(button_frame, text="同时发送请求", command=self.send_requests).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(button_frame, text="清空所有", command=self.clear_all).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(button_frame, text="解析请求", command=self.parse_requests).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(button_frame, text="对比响应", command=self.compare_responses).pack(side=tk.LEFT)
-        
-        # 设置区域（右侧）
-        settings_frame = ttk.Frame(control_frame)
-        settings_frame.pack(side=tk.RIGHT)
-        
-        # HTTPS选项
-        self.https_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(settings_frame, text="强制HTTPS", variable=self.https_var).pack(side=tk.LEFT, padx=(0, 15))
-        
-        # 并发设置
-        ttk.Label(settings_frame, text="并发次数:").pack(side=tk.LEFT, padx=(0, 5))
-        self.concurrent_var = tk.StringVar(value="1")
-        concurrent_spin = ttk.Spinbox(settings_frame, from_=1, to=100, textvariable=self.concurrent_var, width=6)
-        concurrent_spin.pack(side=tk.LEFT, padx=(0, 15))
-        
-        # 延迟设置
-        ttk.Label(settings_frame, text="请求延迟(ms):").pack(side=tk.LEFT, padx=(0, 5))
-        self.delay_var = tk.StringVar(value="0")
-        delay_spin = ttk.Spinbox(settings_frame, from_=0, to=10000, textvariable=self.delay_var, width=8)
-        delay_spin.pack(side=tk.LEFT)
+            # 请求面板容器
+            request_frame = ttk.LabelFrame(parent, text="原始HTTP请求包", padding="10")
+            request_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+            
+            # 创建两个请求面板
+            paned_window = ttk.PanedWindow(request_frame, orient=tk.HORIZONTAL)
+            paned_window.pack(fill=tk.BOTH, expand=True)
+            
+            # 请求1面板
+            req1_frame = ttk.Frame(paned_window)
+            paned_window.add(req1_frame, weight=1)
+            
+            ttk.Label(req1_frame, text="请求包 1:").pack(anchor=tk.W)
+            self.request1 = scrolledtext.ScrolledText(req1_frame, height=12, width=50)
+            self.request1.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
+            
+            # 请求2面板
+            req2_frame = ttk.Frame(paned_window)
+            paned_window.add(req2_frame, weight=1)
+            
+            ttk.Label(req2_frame, text="请求包 2:").pack(anchor=tk.W)
+            self.request2 = scrolledtext.ScrolledText(req2_frame, height=12, width=50)
+            self.request2.pack(fill=tk.BOTH, expand=True, pady=(5, 0))
+            
+            # 控制按钮和延迟设置
+            control_frame = ttk.Frame(request_frame)
+            control_frame.pack(fill=tk.X, pady=(10, 0))
+            
+            # 按钮区域
+            button_frame = ttk.Frame(control_frame)
+            button_frame.pack(side=tk.LEFT)
+            
+            ttk.Button(button_frame, text="同时发送请求", command=self.send_requests).pack(side=tk.LEFT, padx=(0, 10))
+            ttk.Button(button_frame, text="清空所有", command=self.clear_all).pack(side=tk.LEFT, padx=(0, 10))
+            ttk.Button(button_frame, text="解析请求", command=self.parse_requests).pack(side=tk.LEFT, padx=(0, 10))
+            ttk.Button(button_frame, text="对比响应", command=self.compare_responses).pack(side=tk.LEFT)
+            
+            # 设置区域（右侧）
+            settings_frame = ttk.Frame(control_frame)
+            settings_frame.pack(side=tk.RIGHT)
+            
+            # HTTPS选项
+            self.https_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(settings_frame, text="强制HTTPS", variable=self.https_var).pack(side=tk.LEFT, padx=(0, 15))
+            
+            # 并发设置
+            ttk.Label(settings_frame, text="并发次数:").pack(side=tk.LEFT, padx=(0, 5))
+            self.concurrent_var = tk.StringVar(value="1")
+            concurrent_spin = ttk.Spinbox(settings_frame, from_=1, to=100, textvariable=self.concurrent_var, width=6)
+            concurrent_spin.pack(side=tk.LEFT, padx=(0, 15))
+            
+            # 延迟设置
+            ttk.Label(settings_frame, text="请求延迟(ms):").pack(side=tk.LEFT, padx=(0, 5))
+            self.delay_var = tk.StringVar(value="0")
+            delay_spin = ttk.Spinbox(settings_frame, from_=0, to=10000, textvariable=self.delay_var, width=8)
+            delay_spin.pack(side=tk.LEFT)
     
     def create_response_panel(self, parent):
         # 响应面板容器
@@ -129,31 +131,35 @@ class RawHTTPRepeater:
             messagebox.showerror("错误", "至少需要一个请求包")
             self.status_bar.config(text="错误: 至少需要一个请求包")
             return
-        
-        # 在新线程中发送请求
-        thread = threading.Thread(target=self._send_requests_thread, args=(req1_text, req2_text))
-        thread.daemon = True
-        thread.start()
-    
-    def _send_requests_thread(self, req1_text, req2_text):
-        """在新线程中发送请求"""
-        start_time = time.time()
-        
-        # 清空之前的结果
-        self.response1_results = []
-        self.response2_results = []
-        
-        # 获取延迟时间和并发次数
+
+        # 在主线程采集配置（tkinter 变量非线程安全，不能在工作线程中读取）
         try:
             delay_ms = int(self.delay_var.get())
         except ValueError:
             delay_ms = 0
-            
         try:
             concurrent_count = int(self.concurrent_var.get())
         except ValueError:
             concurrent_count = 1
-        
+        concurrent_count = max(1, concurrent_count)  # 防止 Barrier(0) 崩溃
+        force_https = self.https_var.get()
+
+        # 在新线程中发送请求
+        thread = threading.Thread(
+            target=self._send_requests_thread,
+            args=(req1_text, req2_text, delay_ms, concurrent_count, force_https)
+        )
+        thread.daemon = True
+        thread.start()
+    
+    def _send_requests_thread(self, req1_text, req2_text, delay_ms=0, concurrent_count=1, force_https=False):
+        """在新线程中发送请求"""
+        start_time = time.time()
+
+        # 清空之前的结果
+        self.response1_results = []
+        self.response2_results = []
+
         # 规范化请求包换行符
         req1_text = self._normalize_line_endings(req1_text)
         req2_text = self._normalize_line_endings(req2_text)
@@ -174,14 +180,14 @@ class RawHTTPRepeater:
             for i in range(concurrent_count):
                 if req1_text:
                     thread1 = threading.Thread(
-                        target=self._send_single_request, 
-                        args=(1, req1_text, delay_ms, i, concurrent_count, barrier)
+                        target=self._send_single_request,
+                        args=(1, req1_text, delay_ms, i, concurrent_count, barrier, force_https)
                     )
                     threads.append(thread1)
                 if req2_text:
                     thread2 = threading.Thread(
-                        target=self._send_single_request, 
-                        args=(2, req2_text, delay_ms, i, concurrent_count, barrier)
+                        target=self._send_single_request,
+                        args=(2, req2_text, delay_ms, i, concurrent_count, barrier, force_https)
                     )
                     threads.append(thread2)
             
@@ -202,18 +208,28 @@ class RawHTTPRepeater:
             self.root.after(0, lambda: self.status_bar.config(text=f"错误: {str(e)}"))
     
     def _normalize_line_endings(self, text):
-        """规范化HTTP请求的换行符为CRLF"""
+        """规范化HTTP请求头部换行符为CRLF（不改动 body，避免破坏二进制数据）"""
         if not text:
             return text
-        # 先统一为\n，再转换为\r\n
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
-        text = text.replace('\n', '\r\n')
-        # 确保请求以\r\n\r\n结尾（如果有body的话）
-        if not text.endswith('\r\n'):
-            text += '\r\n'
-        return text
+        # 分离 header 与 body（首个空行）
+        if '\r\n\r\n' in text:
+            pos = text.find('\r\n\r\n')
+            headers, body, sep = text[:pos], text[pos + 4:], '\r\n\r\n'
+        elif '\n\n' in text:
+            pos = text.find('\n\n')
+            headers, body, sep = text[:pos], text[pos + 2:], '\r\n\r\n'
+        else:
+            headers, body, sep = text, None, ''
+        # 仅规范化 header 部分的换行符
+        headers = headers.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\r\n')
+        if body is not None:
+            return headers + sep + body
+        # 只有 header，补一个 CRLF 结尾
+        if not headers.endswith('\r\n'):
+            headers += '\r\n'
+        return headers
     
-    def _send_single_request(self, req_num, request_text, delay_ms=0, request_id=0, concurrent_count=1, barrier=None):
+    def _send_single_request(self, req_num, request_text, delay_ms=0, request_id=0, concurrent_count=1, barrier=None, force_https=False):
         """发送单个原始HTTP请求"""
         # 等待所有线程就绪后同时发送（真正的并发）
         if barrier:
@@ -221,16 +237,16 @@ class RawHTTPRepeater:
                 barrier.wait(timeout=5)
             except threading.BrokenBarrierError:
                 pass
-        
+
         # 应用请求延迟
         if delay_ms > 0:
             time.sleep(delay_ms / 1000.0)
-        
+
         start_time = time.time()
-        
+
         try:
             # 解析请求包获取目标主机和端口
-            host, port, is_https = self._parse_request_target(request_text)
+            host, port, is_https = self._parse_request_target(request_text, force_https)
             
             # 发送原始HTTP请求
             response = self._send_raw_http(request_text, host, port, is_https, max_redirects=5)
@@ -253,9 +269,10 @@ class RawHTTPRepeater:
                     self.root.after(0, lambda r=result_entry: self._append_response(self.response2, r))
                 
         except Exception as e:
+            elapsed_time = (time.time() - start_time) * 1000
             error_entry = {
                 'id': request_id + 1,
-                'time': 0,
+                'time': elapsed_time,
                 'response': f"请求失败: {str(e)}",
                 'status': 'ERROR'
             }
@@ -266,7 +283,7 @@ class RawHTTPRepeater:
                 else:
                     self.response2_results.append(error_entry)
                     self.root.after(0, lambda r=error_entry: self._append_response(self.response2, r))
-    
+
     def _extract_status_code(self, response):
         """从响应中提取状态码"""
         try:
@@ -287,12 +304,12 @@ class RawHTTPRepeater:
         text_widget.insert(tk.END, "\n\n")
         text_widget.see(tk.END)
     
-    def _parse_request_target(self, request_text):
+    def _parse_request_target(self, request_text, force_https=False):
         """从请求包中解析目标主机和端口"""
         lines = request_text.split('\r\n') if '\r\n' in request_text else request_text.split('\n')
         host = None
         port = 80
-        is_https = self.https_var.get()  # 检查强制HTTPS选项
+        is_https = force_https  # 是否强制 HTTPS（由主线程传入，避免工作线程读取 tkinter 变量）
         
         # 检查请求行
         first_line = lines[0].strip()
@@ -352,16 +369,21 @@ class RawHTTPRepeater:
                 sock = context.wrap_socket(sock, server_hostname=host)
             
             # 确保请求以正确的换行符结尾
-            if not request_text.endswith('\r\n\r\n'):
-                if '\r\n\r\n' not in request_text:
-                    # 没有空行分隔header和body，添加一个
+            if '\r\n\r\n' in request_text:
+                # 已有 header/body 分隔，保证 body 以 CRLF 结尾
+                if not request_text.endswith('\r\n'):
                     request_text += '\r\n'
-            
+            else:
+                # 仅有 header，补上结束空行
+                request_text += '\r\n\r\n'
+
             sock.sendall(request_text.encode('utf-8'))
 
-            
+            # 解析请求方法（用于判断响应是否含 body）
+            method = request_text.split(' ', 1)[0].upper() if request_text else 'GET'
+
             # 接收完整的HTTP响应
-            response = self._receive_complete_response(sock)
+            response = self._receive_complete_response(sock, method)
 
             # 检查重定向
             status_line = response.split(b'\r\n')[0]
@@ -374,43 +396,53 @@ class RawHTTPRepeater:
             if status_code in [301, 302, 303, 307, 308] and max_redirects > 0:
                 location = self._extract_location_header(response)
                 if location:
-                    # 关闭当前连接
-                    sock.close()
-                    
-                    # 解析重定向位置
-                    new_host, new_port, new_is_https = self._parse_redirect_location(location, host, port)
-                    
-                    # 递归调用处理重定向
+                    # 解析重定向位置（相对路径回退到原始连接参数）
+                    new_host, new_port, new_is_https = self._parse_redirect_location(
+                        location, host, port, is_https
+                    )
+                    # 目标主机变化时重写 Host 头以匹配新目标
+                    new_request_text = self._rewrite_host_header(
+                        request_text, new_host, new_port, new_is_https
+                    )
+                    # 依赖 finally 关闭当前 socket，递归处理重定向
                     return self._send_raw_http(
-                        request_text, new_host, new_port, new_is_https, max_redirects - 1
+                        new_request_text, new_host, new_port, new_is_https, max_redirects - 1
                     )
         finally:
             sock.close()
 
-        return response.decode('utf-8', errors='replace')
+        return self._decode_response(response)
     
-    def _receive_complete_response(self, sock):
+    def _receive_complete_response(self, sock, method="GET"):
         """接收完整的HTTP响应，支持Content-Length和分块传输"""
         response = b""
         headers_complete = False
         content_length = None
         is_chunked = False
         body_start = 0
-        
+        status_code = None
+
         # 第一阶段：接收响应头
         while not headers_complete:
             data = sock.recv(4096)
             if not data:
                 break
             response += data
-            
+
             # 检查是否收到完整的头部（空行\r\n\r\n）
             header_end_pos = response.find(b"\r\n\r\n")
             if header_end_pos != -1:
                 headers_complete = True
                 headers = response[:header_end_pos]
                 body_start = header_end_pos + 4
-                
+
+                # 解析状态码
+                try:
+                    status_line = headers.split(b"\r\n")[0]
+                    status_code = int(status_line.split(b" ")[1])
+                except (IndexError, ValueError):
+                    status_code = None
+
                 # 解析头部信息
                 for line in headers.split(b"\r\n"):
                     line_lower = line.lower()
@@ -419,12 +451,26 @@ class RawHTTPRepeater:
                             content_length = int(line.split(b":")[1].strip())
                         except (ValueError, IndexError):
                             pass
-                    
+
                     if line_lower.startswith(b"transfer-encoding:") and b"chunked" in line_lower:
                         is_chunked = True
-        
+
+        # 这些情况响应体为空：HEAD 请求 / 204 / 304 / 1xx
+        no_body = (
+            method.upper() == "HEAD"
+            or status_code in (204, 304)
+            or (status_code is not None and 100 <= status_code < 200)
+        )
+        if no_body:
+            return response[:body_start]
+
         # 第二阶段：根据头部信息接收响应体
-        if content_length is not None:
+        # 注意：同时存在 Transfer-Encoding: chunked 与 Content-Length 时，按规范优先 chunked
+        if is_chunked:
+            # 处理分块传输编码
+            response = self._receive_chunked_response(sock, response, body_start)
+
+        elif content_length is not None:
             # 使用Content-Length确定响应体长度
             body_received = len(response) - body_start
             while body_received < content_length:
@@ -433,11 +479,7 @@ class RawHTTPRepeater:
                     break
                 response += data
                 body_received += len(data)
-                
-        elif is_chunked:
-            # 处理分块传输编码
-            response = self._receive_chunked_response(sock, response, body_start)
-            
+
         else:
             # 没有Content-Length也不是分块传输，接收直到连接关闭或超时
             try:
@@ -448,96 +490,164 @@ class RawHTTPRepeater:
                     response += data
             except socket.timeout:
                 pass
-        
+
         return response
     
     def _receive_chunked_response(self, sock, current_response, body_start):
-        """处理分块传输编码的响应"""
-        response = current_response
-        chunk_data = response[body_start:]
-        
+        """处理分块传输编码的响应，返回 headers + 解码后的 body"""
+        headers_part = current_response[:body_start]  # 含 header 与 \r\n\r\n 分隔符
+        chunk_data = current_response[body_start:]    # 原始 chunked 字节
+        decoded_body = b""
+
         while True:
-            # 查找块大小行
-            chunk_size_line_end = chunk_data.find(b"\r\n")
-            if chunk_size_line_end == -1:
-                # 需要更多数据来获取块大小
+            # 确保至少有一行（块大小行以 \r\n 结尾）
+            while b"\r\n" not in chunk_data:
                 data = sock.recv(4096)
                 if not data:
-                    break
+                    return headers_part + decoded_body + chunk_data
                 chunk_data += data
-                continue
-            
-            chunk_size_line = chunk_data[:chunk_size_line_end]
+
+            # 解析块大小行（忽略 chunk 扩展，如 ";name=value"）
+            size_line_end = chunk_data.find(b"\r\n")
+            size_token = chunk_data[:size_line_end].split(b";")[0].strip()
             try:
-                # 解析16进制块大小
-                chunk_size = int(chunk_size_line, 16)
+                chunk_size = int(size_token, 16)
             except ValueError:
-                # 无效的块大小，可能遇到结束块
-                if chunk_size_line == b"0":
-                    break
-                # 其他情况，按普通数据处理
-                chunk_data = chunk_data[chunk_size_line_end + 2:]
-                continue
-            
+                # 无法解析的块大小，原样附加剩余数据后返回
+                return headers_part + decoded_body + chunk_data
+
+            # 跳过块大小行
+            chunk_data = chunk_data[size_line_end + 2:]
+
             if chunk_size == 0:
-                # 结束块
+                # 结束块，忽略可能的 trailer，直接结束
                 break
-            
-            # 计算当前已接收的块数据
-            chunk_start = chunk_size_line_end + 2
-            chunk_end = chunk_start + chunk_size
-            chunk_trailer = chunk_end + 2  # 包括\r\n
-            
-            # 如果当前数据不够完整块，继续接收
-            while len(chunk_data) < chunk_trailer:
+
+            # 确保本块数据 + 结尾 \r\n 完整
+            while len(chunk_data) < chunk_size + 2:
                 data = sock.recv(4096)
                 if not data:
                     break
                 chunk_data += data
-            
-            if len(chunk_data) >= chunk_trailer:
-                # 提取完整的块数据
-                chunk = chunk_data[chunk_start:chunk_end]
-                response += chunk
-                # 移动到下一个块
-                chunk_data = chunk_data[chunk_trailer:]
-            else:
-                # 数据不完整，退出
-                break
-        
-        return response
+
+            decoded_body += chunk_data[:chunk_size]
+            chunk_data = chunk_data[chunk_size + 2:]  # 跳过块数据与结尾 \r\n
+
+        return headers_part + decoded_body
     
+    def _decode_response(self, response):
+        """对完整响应做解压 + 字符集解码，避免乱码"""
+        sep = response.find(b'\r\n\r\n')
+        if sep == -1:
+            return response.decode('utf-8', errors='replace')
+
+        headers_bytes = response[:sep]
+        body_bytes = response[sep + 4:]
+        header_lines = headers_bytes.split(b'\r\n')
+
+        # 1) 按 Content-Encoding 解压响应体
+        content_encoding = None
+        for line in header_lines:
+            if line.lower().startswith(b'content-encoding:'):
+                content_encoding = line.split(b':', 1)[1].strip()
+                break
+        body_bytes = self._decompress_body(body_bytes, content_encoding)
+
+        # 2) 探测字符集
+        charset = self._detect_charset(header_lines, body_bytes)
+
+        # header 用 latin-1（ASCII 兼容且安全），body 用探测到的字符集
+        headers_text = headers_bytes.decode('latin-1', errors='replace')
+        try:
+            body_text = body_bytes.decode(charset, errors='replace')
+        except (LookupError, TypeError):
+            body_text = body_bytes.decode('utf-8', errors='replace')
+
+        return headers_text + '\r\n\r\n' + body_text
+
+    def _decompress_body(self, body, content_encoding):
+        """按 Content-Encoding 解压响应体"""
+        if not body or not content_encoding:
+            return body
+        encoding = content_encoding.decode('latin-1', errors='replace').lower()
+        try:
+            if 'gzip' in encoding:
+                return gzip.decompress(body)
+            if 'deflate' in encoding:
+                try:
+                    return zlib.decompress(body)
+                except zlib.error:
+                    # 部分服务器发送的是裸 deflate 流（无 zlib 头）
+                    return zlib.decompress(body, -zlib.MAX_WBITS)
+            if 'br' in encoding:
+                try:
+                    import brotli
+                    return brotli.decompress(body)
+                except ImportError:
+                    return body  # 未安装 brotli，原样返回（显示会乱码但不崩溃）
+        except Exception:
+            return body
+        return body
+
+    def _detect_charset(self, header_lines, body):
+        """探测字符集：Content-Type 的 charset → HTML meta → 回退 utf-8"""
+        # 1) Content-Type 头中的 charset
+        for line in header_lines:
+            if line.lower().startswith(b'content-type:'):
+                for token in line.split(b';'):
+                    token = token.strip().lower()
+                    if token.startswith(b'charset='):
+                        charset = token.split(b'=', 1)[1].strip().strip(b'"\'')
+                        charset = charset.decode('ascii', errors='ignore')
+                        if charset:
+                            return charset
+                break
+        # 2) HTML meta 中的 charset（只看前 4KB）
+        if body:
+            m = re.search(rb'charset\s*=\s*["\']?\s*([A-Za-z0-9_\-]+)', body[:4096], re.IGNORECASE)
+            if m:
+                return m.group(1).decode('ascii', errors='ignore')
+        return 'utf-8'
+
     def _extract_location_header(self, response):
         """从HTTP响应中提取Location头部"""
         headers_part = response.split(b'\r\n\r\n')[0]
         for line in headers_part.split(b'\r\n'):
             if line.lower().startswith(b'location:'):
-                return line.split(b':', 1)[1].strip().decode('utf-8')
+                return line.split(b':', 1)[1].strip().decode('latin-1', errors='replace')
         return None
 
-    def _parse_redirect_location(self, location_url, original_host, original_port):
-        """解析重定向URL"""
+    def _parse_redirect_location(self, location_url, original_host, original_port, original_is_https):
+        """解析重定向URL。绝对URL按其自身scheme/port；相对路径回退到原始连接参数"""
         try:
             parsed = urlparse(location_url)
-            host = parsed.hostname or original_host
-            port = parsed.port or (443 if parsed.scheme == 'https' else 80)
-            is_https = parsed.scheme == 'https'
-            return host, port, is_https
+            host = parsed.hostname
+            if host:
+                # 绝对 URL
+                if parsed.scheme in ('http', 'https'):
+                    is_https = parsed.scheme == 'https'
+                else:
+                    is_https = original_is_https
+                port = parsed.port or (443 if is_https else 80)
+                return host, port, is_https
+            else:
+                # 相对路径，沿用原始 host/port/协议
+                return original_host, original_port, original_is_https
         except Exception:
-            return original_host, original_port, False
+            return original_host, original_port, original_is_https
             
-    def _update_response_ui(self, text_widget, response, elapsed_time=0, request_id=0):
-        """更新响应UI"""
-        # 不清空文本，而是追加内容（用于并发显示）
-        if request_id == 0:
-            text_widget.delete(1.0, tk.END)
-        
-        if elapsed_time > 0:
-            text_widget.insert(tk.END, f"[请求{request_id+1}] 响应时间: {elapsed_time:.0f} ms\n")
-        
-        text_widget.insert(tk.END, response)
-        text_widget.insert(tk.END, "\n" + "="*50 + "\n\n")
-    
+    def _rewrite_host_header(self, request_text, host, port, is_https):
+        """重写请求中的 Host 头以匹配重定向目标"""
+        # 默认端口(80/http、443/https)省略，其余带上端口
+        default_port = 443 if is_https else 80
+        host_value = host if port == default_port else f"{host}:{port}"
+        lines = request_text.split('\r\n')
+        for idx, line in enumerate(lines):
+            if line.lower().startswith('host:'):
+                lines[idx] = f'Host: {host_value}'
+                break
+        return '\r\n'.join(lines)
+
     def clear_all(self):
         """清空所有内容"""
         self.request1.delete(1.0, tk.END)
@@ -560,12 +670,16 @@ class RawHTTPRepeater:
         if self.response1_results:
             report += "【请求包1 响应分析】\n"
             statuses = [r['status'] for r in self.response1_results]
-            times = [r['time'] for r in self.response1_results]
-            
+            # 统计响应时间时排除失败请求（status == 'ERROR'）
+            times = [r['time'] for r in self.response1_results if r['status'] != 'ERROR']
+
             report += f"  总请求数: {len(self.response1_results)}\n"
             report += f"  状态码分布: {dict((s, statuses.count(s)) for s in set(statuses))}\n"
-            report += f"  响应时间: 最小={min(times):.0f}ms, 最大={max(times):.0f}ms, 平均={sum(times)/len(times):.0f}ms\n"
-            
+            if times:
+                report += f"  响应时间: 最小={min(times):.0f}ms, 最大={max(times):.0f}ms, 平均={sum(times)/len(times):.0f}ms\n"
+            else:
+                report += f"  响应时间: 无成功请求\n"
+
             # 检测响应内容差异
             unique_responses = len(set(r['response'][:500] for r in self.response1_results))
             if unique_responses > 1:
@@ -576,12 +690,15 @@ class RawHTTPRepeater:
         if self.response2_results:
             report += "【请求包2 响应分析】\n"
             statuses = [r['status'] for r in self.response2_results]
-            times = [r['time'] for r in self.response2_results]
-            
+            times = [r['time'] for r in self.response2_results if r['status'] != 'ERROR']
+
             report += f"  总请求数: {len(self.response2_results)}\n"
             report += f"  状态码分布: {dict((s, statuses.count(s)) for s in set(statuses))}\n"
-            report += f"  响应时间: 最小={min(times):.0f}ms, 最大={max(times):.0f}ms, 平均={sum(times)/len(times):.0f}ms\n"
-            
+            if times:
+                report += f"  响应时间: 最小={min(times):.0f}ms, 最大={max(times):.0f}ms, 平均={sum(times)/len(times):.0f}ms\n"
+            else:
+                report += f"  响应时间: 无成功请求\n"
+
             unique_responses = len(set(r['response'][:500] for r in self.response2_results))
             if unique_responses > 1:
                 report += f"  ⚠️ 发现 {unique_responses} 种不同响应内容！可能存在竞态条件\n"
